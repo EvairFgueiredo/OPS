@@ -1,22 +1,25 @@
 import asyncio
 import websockets
 
+# Dicionário para armazenar conexões pendentes
 pending_tunnels = {}
 
 async def handle_connection(websocket, path):
     try:
         init_msg = await websocket.recv()
     except Exception as e:
-        print("Erro ao receber mensagem inicial:", e)
+        print("[OT.py] Erro ao receber mensagem inicial:", e)
         return
 
     if init_msg.startswith("NOVO_TUNEL:"):
         _, tunnel_id = init_msg.split(":", 1)
-        print(f"[OT.py] NOVO_TUNEL recebido para {tunnel_id}")
+        print(f"[OT.py] Recebeu NOVO_TUNEL para {tunnel_id}")
+
         pair_future = asyncio.get_event_loop().create_future()
         pending_tunnels[tunnel_id] = (websocket, pair_future)
+
         try:
-            partner_ws = await asyncio.wait_for(pair_future, timeout=15)  # aumentei o timeout
+            partner_ws = await asyncio.wait_for(pair_future, timeout=15)
             await websocket.send("TUNEL_ESTABELECIDO")
             print(f"[OT.py] Túnel {tunnel_id} pareado. Iniciando relay.")
             await relay(websocket, partner_ws)
@@ -34,7 +37,8 @@ async def handle_connection(websocket, path):
 
     elif init_msg.startswith("CONEXAO_RETORNO:"):
         _, tunnel_id = init_msg.split(":", 1)
-        print(f"[OT.py] CONEXAO_RETORNO recebido para {tunnel_id}")
+        print(f"[OT.py] Recebeu CONEXAO_RETORNO para {tunnel_id}")
+
         if tunnel_id in pending_tunnels:
             ws_novo, pair_future = pending_tunnels[tunnel_id]
             if not pair_future.done():
