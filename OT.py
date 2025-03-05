@@ -3,7 +3,7 @@ import websockets
 import os
 
 WEB_SOCKET_PORT = int(os.environ.get("PORT", 10000))  # Usando a porta configurada pelo Render, ou 80 como fallback
-TCP_SERVER_HOST = '127.0.0.1'
+TCP_SERVER_HOST = '45.180.17.246'
 TCP_SERVER_PORT = 7171
 OTC_TCP_PORT = 860  # Porta para o OTC se conectar
 
