@@ -34,17 +34,23 @@ async def handle_tcp_connection(reader, writer):
         return
 
     try:
-        while True:
-            data = await reader.read(1024)
-            if not data:
-                break
-            print(f"[OTC → WS] Enviando {len(data)} bytes")
-            await reverse_tunnel.send(data)
-            
-            ws_data = await reverse_tunnel.recv()
-            print(f"[WS → OTC] Recebendo {len(ws_data)} bytes")
-            writer.write(ws_data)
-            await writer.drain()
+        async def tcp_to_ws():
+            while True:
+                data = await reader.read(1024)
+                if not data:
+                    break
+                print(f"[OTC → WS] Enviando {len(data)} bytes")
+                await reverse_tunnel.send(data)
+
+        async def ws_to_tcp():
+            while True:
+                ws_data = await reverse_tunnel.recv()
+                print(f"[WS → OTC] Recebendo {len(ws_data)} bytes")
+                writer.write(ws_data)
+                await writer.drain()
+
+        await asyncio.gather(tcp_to_ws(), ws_to_tcp())
+
     except Exception as e:
         print("[TCP ↔ WS Erro]", e)
     finally:
