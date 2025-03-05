@@ -1,4 +1,3 @@
-# OT.py
 import asyncio
 import websockets
 
@@ -10,8 +9,13 @@ async def handle_reverse_client(websocket):
     reverse_tunnel = websocket
     print("[Reverse Tunnel] Cliente reverso conectado via WebSocket.")
     try:
-        # Mantém a conexão aberta
-        await websocket.wait_closed()
+        async for message in websocket:
+            print(f"[WS → OTC] Recebido {len(message)} bytes do cliente reverso")
+            # Encaminhe a mensagem para o cliente OTC (via cliente reverso)
+            if reverse_tunnel:
+                await reverse_tunnel.send(message)
+    except Exception as e:
+        print("[Erro no Reverse Tunnel]:", e)
     finally:
         reverse_tunnel = None
 
