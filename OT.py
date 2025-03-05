@@ -1,8 +1,8 @@
 import asyncio
 import websockets
 
-# Dicionário para armazenar túneis ativos: tunnel_id -> (ws_in, ws_out)
-tunnels = {}
+# Dicionário para armazenar conexões pendentes: tunnel_id -> conexão "NOVO_TUNEL"
+pending_tunnels = {}
 
 async def relay(ws1, ws2):
     async def forward(ws_from, ws_to):
@@ -15,46 +15,36 @@ async def relay(ws1, ws2):
 
 async def handle_connection(websocket, path):
     try:
-        # Recebe a mensagem inicial para identificar a conexão
         init_msg = await websocket.recv()
     except Exception as e:
         print("Erro ao receber mensagem inicial:", e)
         return
 
-    # Protocolo simples:
-    # Se a mensagem começar com "NOVO_TUNEL:" é a conexão iniciada pelo reverse client.
-    # Exemplo do formato: "NOVO_TUNEL:ws://<callback>:20000:tunnel123"
+    # Se a mensagem for "NOVO_TUNEL:{tunnel_id}", armazena essa conexão
     if init_msg.startswith("NOVO_TUNEL:"):
+        _, tunnel_id = init_msg.split(":", 1)
+        print(f"[OT.py] Recebeu NOVO_TUNEL para {tunnel_id}")
+        pending_tunnels[tunnel_id] = websocket
+        # Aguarda até que a outra conexão chegue para o mesmo tunnel_id
         try:
-            # Extrai callback_url e tunnel_id
-            _, callback_url, tunnel_id = init_msg.split(":", 2)
-        except ValueError:
-            await websocket.send("ERRO: formato inválido")
-            return
-
-        print(f"[OT.py] Recebeu solicitação de túnel {tunnel_id} com callback {callback_url}")
-
-        # OT.py conecta de volta ao reverse client via callback URL
-        try:
-            ws_return = await websockets.connect(callback_url)
-            await ws_return.send(f"CONEXAO_RETORNO:{tunnel_id}")
-            print(f"[OT.py] Conectado de volta ao reverse client para túnel {tunnel_id}")
+            while tunnel_id in pending_tunnels and pending_tunnels[tunnel_id] is websocket:
+                await asyncio.sleep(0.1)
         except Exception as e:
-            print(f"[OT.py] Erro ao conectar no callback {callback_url}: {e}")
-            await websocket.send("ERRO: não foi possível conectar no callback")
-            return
+            print("Erro aguardando pareamento:", e)
 
-        # Armazena as duas conexões e inicia o relay
-        tunnels[tunnel_id] = (websocket, ws_return)
-        await websocket.send("TUNEL_ESTABELECIDO")
-        print(f"[OT.py] Túnel {tunnel_id} estabelecido. Iniciando relay.")
-        await relay(websocket, ws_return)
-        print(f"[OT.py] Túnel {tunnel_id} encerrado.")
-        del tunnels[tunnel_id]
-
+    # Se a mensagem for "CONEXAO_RETORNO:{tunnel_id}", procura a conexão pendente
     elif init_msg.startswith("CONEXAO_RETORNO:"):
-        # Se receber essa mensagem diretamente, trata como inesperado
-        await websocket.send("ERRO: Conexão de retorno inesperada")
+        _, tunnel_id = init_msg.split(":", 1)
+        print(f"[OT.py] Recebeu CONEXAO_RETORNO para {tunnel_id}")
+        if tunnel_id in pending_tunnels:
+            ws_novo = pending_tunnels.pop(tunnel_id)
+            print(f"[OT.py] Túnel {tunnel_id} pareado. Iniciando relay.")
+            await websocket.send("TUNEL_ESTABELECIDO")
+            await ws_novo.send("TUNEL_ESTABELECIDO")
+            await relay(ws_novo, websocket)
+            print(f"[OT.py] Túnel {tunnel_id} encerrado.")
+        else:
+            await websocket.send("ERRO: túnel não encontrado")
     else:
         await websocket.send("ERRO: comando desconhecido")
 
