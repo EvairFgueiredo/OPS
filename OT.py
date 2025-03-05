@@ -2,73 +2,72 @@ import asyncio
 import websockets
 import os
 
-WEB_SOCKET_PORT = int(os.environ.get("PORT", 10000))  # Usando a porta configurada pelo Render, ou 80 como fallback
-TCP_SERVER_HOST = '127.0.0.1'
-TCP_SERVER_PORT = 7171
-OTC_TCP_PORT = 860  # Porta para o OTC se conectar
+# A porta utilizada será definida pela variável de ambiente PORT do Render ou, se não estiver definida, usará 10000.
+WEB_SOCKET_PORT = int(os.environ.get("PORT", 10000))
 
-async def bridge(websocket, tcp_reader, tcp_writer):
-    async def ws_to_tcp():
-        try:
-            async for data in websocket:
-                print(f"[WS → TCP] Enviando {len(data)} bytes: {data.hex()}")
-                tcp_writer.write(data)
-                await tcp_writer.drain()
-        except Exception as e:
-            print("[WS → TCP Erro]", e)
+# Variável global para armazenar a conexão reversa (única, neste exemplo)
+reverse_connection = None
 
-    async def tcp_to_ws():
-        try:
-            while True:
-                # Lê o header do pacote (2 bytes indicando o tamanho)
-                header = await tcp_reader.read(2)
-                if len(header) < 2:
-                    break
-                size = int.from_bytes(header, byteorder='little')
-                # Lê o restante do pacote
-                data = await tcp_reader.read(size)
-                packet = header + data
-                print(f"[TCP → WS] Recebido {len(packet)} bytes: {packet.hex()}")
-                await websocket.send(packet)
-        except Exception as e:
-            print("[TCP → WS Erro]", e)
-
-    await asyncio.gather(ws_to_tcp(), tcp_to_ws())
-
-async def handle_otc_connection(reader, writer):
-    print("[Nova Conexão OTC]")
+# Handler para a conexão reversa (do cliente reverso, que está na máquina local com o Open Tibia)
+async def handle_reverse_connection(websocket, path):
+    global reverse_connection
+    print("[Reverse] Conexão reversa estabelecida.")
+    # Se já houver uma conexão reversa ativa, recusa a nova conexão
+    if reverse_connection is not None:
+        print("Já existe uma conexão reversa ativa. Fechando nova conexão.")
+        await websocket.send("Erro: Conexão reversa já ativa.")
+        await websocket.close()
+        return
+    reverse_connection = websocket
     try:
-        # Conecta ao servidor WebSocket (ponte)
-        async with websockets.connect(f"ws://{TCP_SERVER_HOST}:{WEB_SOCKET_PORT}") as websocket:
-            print("[Conectado ao WebSocket]")
-            await bridge(websocket, reader, writer)
-    except Exception as e:
-        print("[Erro OTC]", e)
+        await websocket.wait_closed()
     finally:
-        writer.close()
-        await writer.wait_closed()
+        print("Conexão reversa encerrada.")
+        reverse_connection = None
 
-async def handle_ws_connection(websocket, path):
-    print(f"[Nova Conexão WebSocket] {websocket.remote_address}")
-    try:
-        # Conecta ao servidor Open Tibia
-        tcp_reader, tcp_writer = await asyncio.open_connection(TCP_SERVER_HOST, TCP_SERVER_PORT)
-        print("[Conectado ao Open Tibia Server]")
-        await bridge(websocket, tcp_reader, tcp_writer)
-    except Exception as e:
-        print("[Erro WebSocket]", e)
-    finally:
+# Handler para as conexões dos clientes OTC
+async def handle_client_connection(websocket, path):
+    global reverse_connection
+    print(f"[Cliente OTC] Conexão de {websocket.remote_address}")
+    if reverse_connection is None:
+        await websocket.send("Erro: conexão reversa não disponível.")
+        await websocket.close()
+        return
+
+    # Funções para encaminhar dados entre o cliente e a conexão reversa
+    async def client_to_reverse():
+        try:
+            async for message in websocket:
+                print(f"[Cliente -> Reverse] Enviando {len(message)} bytes")
+                await reverse_connection.send(message)
+        except Exception as e:
+            print("Erro no encaminhamento do cliente para reverse:", e)
+
+    async def reverse_to_client():
+        try:
+            async for message in reverse_connection:
+                print(f"[Reverse -> Cliente] Enviando {len(message)} bytes")
+                await websocket.send(message)
+        except Exception as e:
+            print("Erro no encaminhamento do reverse para cliente:", e)
+    
+    await asyncio.gather(client_to_reverse(), reverse_to_client())
+
+# Roteador que direciona as conexões conforme o path da URL
+async def router(websocket, path):
+    print(f"Nova conexão: path={path}")
+    if path == "/reverse":
+        await handle_reverse_connection(websocket, path)
+    elif path == "/client":
+        await handle_client_connection(websocket, path)
+    else:
+        await websocket.send("Caminho inválido.")
         await websocket.close()
 
 async def main():
-    # Servidor TCP para o OTC (cliente)
-    tcp_server = await asyncio.start_server(handle_otc_connection, "0.0.0.0", OTC_TCP_PORT)
-    print(f"[Servidor TCP para OTC] Porta {OTC_TCP_PORT}")
-
-    # Servidor WebSocket (ponte) agora escutando na porta do Render
-    async with websockets.serve(handle_ws_connection, "0.0.0.0", WEB_SOCKET_PORT):
-        print(f"[Servidor WebSocket] Porta {WEB_SOCKET_PORT}")
-        await tcp_server.serve_forever()
+    server = await websockets.serve(router, "0.0.0.0", WEB_SOCKET_PORT)
+    print(f"Servidor WebSocket rodando na porta {WEB_SOCKET_PORT}")
+    await server.wait_closed()
 
 if __name__ == "__main__":
     asyncio.run(main())
