@@ -5,18 +5,28 @@ import websockets
 OTC_TCP_PORT = 860  # Porta pública para conexões OTC
 WS_PORT = int(os.environ.get("PORT", 10000))
 
-# Variável global para armazenar a conexão reversa
+# Variáveis globais para armazenar a conexão reversa e as mensagens recebidas
 reverse_tunnel = None
+reverse_queue = asyncio.Queue()
 
 async def handle_ws_connection(websocket, path):
     global reverse_tunnel
     print("[Reverse Tunnel] Conexão estabelecida do cliente reverso.")
     reverse_tunnel = websocket
     try:
-        await websocket.wait_closed()
+        # Loop para ler mensagens do cliente reverso e armazená-las na fila
+        while True:
+            msg = await websocket.recv()
+            print(f"[Reverse Tunnel] Mensagem recebida: {len(msg)} bytes")
+            await reverse_queue.put(msg)
+    except Exception as e:
+        print("[Reverse Tunnel] Erro ou conexão fechada:", e)
     finally:
         print("[Reverse Tunnel] Conexão encerrada.")
         reverse_tunnel = None
+        # Limpa a fila (opcional)
+        while not reverse_queue.empty():
+            reverse_queue.get_nowait()
 
 async def handle_tcp_connection(reader, writer):
     global reverse_tunnel
@@ -41,10 +51,11 @@ async def handle_tcp_connection(reader, writer):
     async def ws_to_tcp():
         try:
             while True:
-                data = await reverse_tunnel.recv()
+                # Pega a próxima mensagem da fila
+                data = await reverse_queue.get()
                 if data is None:
                     break
-                print(f"[WS → OTC] Recebido {len(data)} bytes: {data.hex()}")
+                print(f"[WS → OTC] Enviando {len(data)} bytes: {data.hex()}")
                 writer.write(data)
                 await writer.drain()
         except Exception as e:
