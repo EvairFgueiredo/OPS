@@ -42,6 +42,7 @@ async def handle_tcp_connection(reader, writer):
             while True:
                 data = await reader.read(1024)
                 if not data:
+                    print("[OTC → WS] Sem dados recebidos, encerrando.")
                     break
                 print(f"[OTC → WS] Enviando {len(data)} bytes: {data.hex()}")
                 await reverse_tunnel.send(data)
@@ -51,7 +52,6 @@ async def handle_tcp_connection(reader, writer):
     async def ws_to_tcp():
         try:
             while True:
-                # Pega a próxima mensagem da fila
                 data = await reverse_queue.get()
                 if data is None:
                     break
@@ -67,8 +67,10 @@ async def handle_tcp_connection(reader, writer):
     print("[OTC] Conexão encerrada.")
 
 async def main():
-    # Inicia o WebSocket server para o túnel reverso
-    ws_server = await websockets.serve(handle_ws_connection, "0.0.0.0", WS_PORT)
+    # Inicia o WebSocket server para o túnel reverso, desabilitando pings automáticos
+    ws_server = await websockets.serve(
+        handle_ws_connection, "0.0.0.0", WS_PORT, ping_interval=None
+    )
     print(f"[Servidor WS Público] Rodando na porta {WS_PORT}")
 
     # Inicia o TCP server para conexões do OTC
