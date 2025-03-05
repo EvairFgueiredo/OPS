@@ -9,7 +9,7 @@ WS_PORT = int(os.environ.get("PORT", 10000))
 reverse_tunnel = None
 reverse_queue = asyncio.Queue()
 
-async def handle_ws_connection(websocket, path):
+async def handle_ws_connection(websocket, path=None):
     global reverse_tunnel
     print("[Reverse Tunnel] Conexão estabelecida do cliente reverso.")
     reverse_tunnel = websocket
