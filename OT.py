@@ -1,70 +1,69 @@
 import asyncio
 import os
+import websockets
 
-OTC_TCP_PORT = 860  # Porta pública para conexões do OTC
-LOCAL_TIBIA_PORT = 7171  # Porta local do servidor Tibia
+OTC_TCP_PORT = 860  # Porta pública para conexões OTC
+WS_PORT = int(os.environ.get("PORT", 10000))
+
+# Variáveis globais para armazenar a conexão reversa e as mensagens recebidas
+reverse_tunnel = None
+
+async def handle_ws_connection(websocket):
+    global reverse_tunnel
+    print("[Reverse Tunnel] Conexão estabelecida do cliente reverso.")
+    reverse_tunnel = websocket
+    try:
+        async for message in websocket:
+            print(f"[Reverse Tunnel] Mensagem recebida: {len(message)} bytes")
+            if reverse_tunnel:
+                await reverse_tunnel.send(message)
+    except Exception as e:
+        print("[Reverse Tunnel] Erro ou conexão fechada:", e)
+    finally:
+        print("[Reverse Tunnel] Conexão encerrada.")
+        reverse_tunnel = None
 
 async def handle_tcp_connection(reader, writer):
+    global reverse_tunnel
     print("[OTC] Conexão recebida do cliente OTC.")
     
-    try:
-        # Conectar ao servidor Tibia local
-        tibia_reader, tibia_writer = await asyncio.open_connection('127.0.0.1', LOCAL_TIBIA_PORT)
-        print("[Proxy] Conectado ao servidor Tibia local.")
-        
-        async def client_to_server():
-            try:
-                while True:
-                    data = await reader.read(1024)
-                    if not data:
-                        break
-                    print(f"[OTC → Tibia] Enviando {len(data)} bytes")
-                    tibia_writer.write(data)
-                    await tibia_writer.drain()
-            except Exception as e:
-                print("[OTC → Tibia Erro]", e)
+    if not reverse_tunnel:
+        print("[OTC] Nenhum túnel reverso disponível!")
+        writer.close()
+        await writer.wait_closed()
+        return
 
-        async def server_to_client():
-            try:
-                while True:
-                    data = await tibia_reader.read(1024)
-                    if not data:
-                        break
-                    print(f"[Tibia → OTC] Enviando {len(data)} bytes")
-                    writer.write(data)
-                    await writer.drain()
-            except Exception as e:
-                print("[Tibia → OTC Erro]", e)
-        
-        # Executar ambas as direções simultaneamente
-        await asyncio.gather(client_to_server(), server_to_client())
-    
+    try:
+        while True:
+            data = await reader.read(1024)
+            if not data:
+                break
+            print(f"[OTC → WS] Enviando {len(data)} bytes")
+            await reverse_tunnel.send(data)
+            
+            ws_data = await reverse_tunnel.recv()
+            print(f"[WS → OTC] Recebendo {len(ws_data)} bytes")
+            writer.write(ws_data)
+            await writer.drain()
     except Exception as e:
-        print("[Proxy Erro]", e)
+        print("[TCP ↔ WS Erro]", e)
     finally:
         writer.close()
         await writer.wait_closed()
         print("[OTC] Conexão encerrada.")
 
 async def main():
-    # Iniciar o servidor TCP
-    server = await asyncio.start_server(handle_tcp_connection, "0.0.0.0", OTC_TCP_PORT)
+    ws_server = await websockets.serve(handle_ws_connection, "0.0.0.0", WS_PORT)
+    print(f"[Servidor WS Público] Rodando na porta {WS_PORT}")
+
+    tcp_server = await asyncio.start_server(handle_tcp_connection, "0.0.0.0", OTC_TCP_PORT)
     print(f"[Servidor TCP Público] Rodando na porta {OTC_TCP_PORT}")
-    
-    async with server:
-        await server.serve_forever()
+
+    async with tcp_server, ws_server:
+        await asyncio.gather(tcp_server.serve_forever(), ws_server.wait_closed())
 
 if __name__ == "__main__":
     asyncio.run(main())
 
 
-# O que mudou:
-# 1. Removi o WebSocket completamente.
-# 2. Agora o proxy apenas conecta a porta pública (860) à porta local (7171).
-# 3. As mensagens binárias são encaminhadas diretamente, sem handshake HTTP.
-
-# Próximos passos:
-# - Subir isso no Render.
-# - Configurar o cliente Tibia para conectar no domínio do Render, porta 860.
-
-# Me avise quando estiver pronto para testar! 🚀
+# Isso mantém a conexão WebSocket e TCP em paralelo! 🚀
