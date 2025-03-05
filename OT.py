@@ -1,7 +1,7 @@
 import asyncio
 import websockets
 
-# Variável global para armazenar a conexão do cliente reverso
+# Armazena a conexão do cliente reverso
 reverse_tunnel = None
 
 async def handle_reverse_client(websocket):
@@ -9,13 +9,13 @@ async def handle_reverse_client(websocket):
     reverse_tunnel = websocket
     print("[Reverse Tunnel] Cliente reverso conectado via WebSocket.")
     try:
+        # Mantém a conexão e encaminha mensagens bidirecionalmente
         async for message in websocket:
-            print(f"[WS → OTC] Recebido {len(message)} bytes do cliente reverso")
-            # Encaminhe a mensagem para o cliente OTC (via cliente reverso)
+            print(f"[Tibia → OTC] Encaminhando {len(message)} bytes para o cliente OTC")
             if reverse_tunnel:
                 await reverse_tunnel.send(message)
     except Exception as e:
-        print("[Erro no Reverse Tunnel]:", e)
+        print("[Erro no túnel reverso]:", e)
     finally:
         reverse_tunnel = None
 
