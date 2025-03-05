@@ -1,7 +1,8 @@
 import asyncio
 import websockets
+import os
 
-WEB_SOCKET_PORT = 10000
+WEB_SOCKET_PORT = int(os.environ.get("PORT", 10000))  # Usando a porta configurada pelo Render, ou 80 como fallback
 TCP_SERVER_HOST = '127.0.0.1'
 TCP_SERVER_PORT = 7171
 OTC_TCP_PORT = 860  # Porta para o OTC se conectar
@@ -64,7 +65,7 @@ async def main():
     tcp_server = await asyncio.start_server(handle_otc_connection, "0.0.0.0", OTC_TCP_PORT)
     print(f"[Servidor TCP para OTC] Porta {OTC_TCP_PORT}")
 
-    # Servidor WebSocket (ponte)
+    # Servidor WebSocket (ponte) agora escutando na porta do Render
     async with websockets.serve(handle_ws_connection, "0.0.0.0", WEB_SOCKET_PORT):
         print(f"[Servidor WebSocket] Porta {WEB_SOCKET_PORT}")
         await tcp_server.serve_forever()
