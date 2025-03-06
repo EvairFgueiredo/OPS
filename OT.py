@@ -66,14 +66,14 @@ class TunnelManager:
             print(f"[OT.py] Túnel {tunnel_id} encerrado.")
 
 async def process_request(path, request_headers):
-    # Verifica se a requisição é de upgrade para WebSocket.
-    # Se não for (por exemplo, uma requisição HEAD para health check), retorna uma resposta HTTP simples.
+    # Se a requisição não for de upgrade para WebSocket (por exemplo, health check),
+    # retorna uma resposta HTTP simples.
     if request_headers.get("Upgrade", "").lower() != "websocket":
         return 200, [("Content-Type", "text/plain")], b"OK\n"
     return None
 
 async def main():
-    tunnel_manager = TunnelManager()
+    tunnel_manager = TunnelManager()  # Cria a instância para acessar os métodos de tratamento
     PORT = int(os.getenv("PORT", 10000))
     async with websockets.serve(
         tunnel_manager.handle_tunnel, "0.0.0.0", PORT,
