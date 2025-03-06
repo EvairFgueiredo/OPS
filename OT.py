@@ -2,6 +2,7 @@ import asyncio
 import websockets
 import os
 from urllib.parse import parse_qs
+from websockets.server import WebSocketServerProtocol
 
 class TunnelManager:
     def __init__(self):
@@ -66,18 +67,35 @@ class TunnelManager:
             print(f"[OT.py] Túnel {tunnel_id} encerrado.")
 
 async def process_request(path, request_headers):
-    # Se a requisição não for de upgrade para WebSocket (por exemplo, health check),
+    # Se a requisição não for de upgrade para WebSocket (por exemplo, um health check)
     # retorna uma resposta HTTP simples.
     if request_headers.get("Upgrade", "").lower() != "websocket":
         return 200, [("Content-Type", "text/plain")], b"OK\n"
     return None
 
+class MyWebSocketServerProtocol(WebSocketServerProtocol):
+    async def handshake(self, *args, **kwargs):
+        try:
+            return await super().handshake(*args, **kwargs)
+        except ValueError as exc:
+            if "expected GET; got HEAD" in str(exc):
+                # Trata requisições HEAD enviando um HTTP 200 OK
+                self.writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK")
+                await self.writer.drain()
+                self.writer.close()
+                return None
+            else:
+                raise
+
 async def main():
-    tunnel_manager = TunnelManager()  # Cria a instância para acessar os métodos de tratamento
+    tunnel_manager = TunnelManager()
     PORT = int(os.getenv("PORT", 10000))
     async with websockets.serve(
-        tunnel_manager.handle_tunnel, "0.0.0.0", PORT,
-        process_request=process_request
+        tunnel_manager.handle_tunnel,
+        "0.0.0.0",
+        PORT,
+        process_request=process_request,
+        create_protocol=MyWebSocketServerProtocol
     ):
         print(f"[OT.py] Servidor WebSocket rodando em 0.0.0.0:{PORT}")
         await asyncio.Future()  # Mantém o servidor em execução
