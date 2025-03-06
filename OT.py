@@ -3,7 +3,7 @@ import websockets
 
 # Configurações
 LOCAL_WS_IP = "0.0.0.0"
-LOCAL_WS_PORT = 11000
+LOCAL_WS_PORT = 10000
 
 # Armazena conexões ativas
 tunnels = {}
