@@ -10,10 +10,8 @@ async def process_request(path, request_headers):
         return 200, [("Content-Type", "text/plain")], b"OK\n"
     return None
 
-tunnels = {}  # Armazena WebSockets por tunnel_id
-
 async def handle_tunnel(websocket, path):
-    # Extrai tunnel_id
+    # Extrai tunnel_id da query string
     query = parse_qs(path.split('?')[-1] if '?' in path else '')
     tunnel_id = query.get('tunnel_id', [None])[0]
     if not tunnel_id:
@@ -26,35 +24,26 @@ async def handle_tunnel(websocket, path):
     try:
         message = await websocket.recv()
         if message.startswith("REGISTER_TIBIA"):
-            tunnels[tunnel_id] = {"tibia": websocket}
             print(f"[OT.py] Tibia registrado no túnel {tunnel_id}.")
         elif message.startswith("REGISTER_OTC"):
-            tunnels[tunnel_id] = {"otc": websocket}
             print(f"[OT.py] OTC registrado no túnel {tunnel_id}.")
         else:
             print(f"[OT.py] Mensagem de registro inválida: {message}")
             await websocket.close(code=1008, reason="Registro inválido")
             return
 
-        # Roteamento entre Tibia e OTC
-        if "tibia" in tunnels[tunnel_id] and "otc" in tunnels[tunnel_id]:
-            tibia_ws = tunnels[tunnel_id]["tibia"]
-            otc_ws = tunnels[tunnel_id]["otc"]
-            async for data in websocket:
-                if websocket == tibia_ws:
-                    await otc_ws.send(data)
-                else:
-                    await tibia_ws.send(data)
+        async for data in websocket:
+            print(f"[OT.py] Recebidos {len(data)} bytes no túnel {tunnel_id}.")
+            # Aqui você pode implementar o roteamento entre Tibia e OTC
+            # ou outra lógica de negócio
+            await websocket.send(data)
     except websockets.exceptions.ConnectionClosed:
         print(f"[OT.py] Conexão fechada para o túnel {tunnel_id}.")
     except Exception as e:
         print(f"[OT.py] Erro no túnel {tunnel_id}: {e}")
-    finally:
-        if tunnel_id in tunnels:
-            del tunnels[tunnel_id]
 
 async def main():
-    port = int(os.environ.get("PORT", 8765))
+    port = int(os.environ.get("PORT", 10000))
     async with websockets.serve(
         handle_tunnel,
         "0.0.0.0",
