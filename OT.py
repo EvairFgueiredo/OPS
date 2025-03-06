@@ -11,46 +11,41 @@ async def process_request(path, request_headers):
     return None
 
 async def handle_tunnel(websocket, path):
-    query = parse_qs(path.split('?')[-1] if '?' in path else '')
-    tunnel_id = query.get('tunnel_id', [None])[0]
-    
-    if not tunnel_id:
-        await websocket.close(code=1008, reason="tunnel_id ausente")
-        return
-
-    print(f"[OT.py] Túnel {tunnel_id} conectado.")
+    # ... (extração do tunnel_id)
 
     try:
         message = await websocket.recv()
         if message == "REGISTER_TIBIA":
+            if tunnel_id in tunnels:
+                print(f"[OT.py] Erro: tunnel_id {tunnel_id} já registrado.")
+                await websocket.close(code=1008, reason="Tunnel_id em uso")
+                return
             tunnels[tunnel_id] = {"tibia": websocket, "otc": None}
             print(f"[OT.py] Tibia registrado no túnel {tunnel_id}.")
         elif message == "REGISTER_OTC":
-            if tunnel_id in tunnels and tunnels[tunnel_id]["tibia"]:
-                tunnels[tunnel_id]["otc"] = websocket
-                print(f"[OT.py] OTC registrado no túnel {tunnel_id}.")
-            else:
+            if tunnel_id not in tunnels or tunnels[tunnel_id]["tibia"] is None:
+                print(f"[OT.py] Erro: Tibia não registrado para o túnel {tunnel_id}.")
                 await websocket.close(code=1008, reason="Tibia não registrado")
                 return
-        else:
-            await websocket.close(code=1008, reason="Registro inválido")
-            return
+            tunnels[tunnel_id]["otc"] = websocket
+            print(f"[OT.py] OTC registrado no túnel {tunnel_id}.")
 
-        # Encaminha mensagens entre Tibia e OTC
-        tibia_ws = tunnels[tunnel_id]["tibia"]
-        otc_ws = tunnels[tunnel_id]["otc"]
+            # Inicia o roteamento
+            tibia_ws = tunnels[tunnel_id]["tibia"]
+            otc_ws = tunnels[tunnel_id]["otc"]
 
-        async def forward(source, target):
-            async for data in source:
-                await target.send(data)
-                print(f"[OT.py] Encaminhados {len(data)} bytes.")
+            async def forward(source, target):
+                try:
+                    async for data in source:
+                        await target.send(data)
+                        print(f"[OT.py] Dados encaminhados: {len(data)} bytes.")
+                except websockets.exceptions.ConnectionClosed:
+                    print("[OT.py] Conexão fechada durante o encaminhamento.")
 
-        tasks = []
-        if otc_ws:
-            tasks.append(forward(tibia_ws, otc_ws))
-            tasks.append(forward(otc_ws, tibia_ws))
-        
-        await asyncio.gather(*tasks)
+            await asyncio.gather(
+                forward(tibia_ws, otc_ws),
+                forward(otc_ws, tibia_ws)
+            )
 
     except websockets.exceptions.ConnectionClosed:
         print(f"[OT.py] Conexão fechada para o túnel {tunnel_id}.")
@@ -59,7 +54,7 @@ async def handle_tunnel(websocket, path):
             del tunnels[tunnel_id]
 
 async def main():
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", 8765))
     async with websockets.serve(
         handle_tunnel, 
         "0.0.0.0", 
