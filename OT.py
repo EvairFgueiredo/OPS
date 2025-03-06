@@ -2,9 +2,10 @@ import asyncio
 import os
 import websockets
 from urllib.parse import parse_qs
+import time
 
 # Dicionário para armazenar túneis ativos.
-# Cada túnel tem chaves: 'tibia' e 'otc'
+# Cada túnel terá: 'tibia', 'otc' e 'timestamp'
 tunnels = {}
 
 async def process_request(path, request_headers):
@@ -18,54 +19,75 @@ async def handle_tunnel(websocket, path):
     tunnel_id = query.get('tunnel_id', [None])[0]
     
     if not tunnel_id:
-        # Se tunnel_id não foi fornecido, assume-se que é uma conexão OTC que precisa descobrir o tunnel_id
-        print("[OT.py] Conexão OTC sem tunnel_id. Aguardando REQUEST_TUNNEL.")
-        message = await websocket.recv()
+        # Conexão OTC que não forneceu tunnel_id; espera REQUEST_TUNNEL
+        g_msg = "[OT.py] Conexão OTC sem tunnel_id. Aguardando REQUEST_TUNNEL."
+        print(g_msg)
+        await websocket.send("ERROR: TunnelID not provided, send REQUEST_TUNNEL")
+        try:
+            message = await websocket.recv()
+        except Exception as e:
+            print("[OT.py] Erro ao receber mensagem:", e)
+            return
         if message != "REQUEST_TUNNEL":
             print(f"[OT.py] Mensagem inválida sem tunnel_id: {message}")
             await websocket.close(code=1008, reason="Registro inválido")
             return
         
-        # Procura por um túnel com Tibia registrado e OTC ausente
-        available = [tid for tid, conns in tunnels.items() if conns.get("tibia") is not None and conns.get("otc") is None]
-        if len(available) != 1:
-            print("[OT.py] Nenhum ou múltiplos túneis disponíveis para OTC.")
+        # Procura o túnel com o timestamp mais recente que tem Tibia registrado e OTC ausente
+        if not tunnels:
+            print("[OT.py] Nenhum túnel disponível no momento.")
+            await websocket.send("ERROR: No tunnel available")
             await websocket.close(code=1008, reason="Túnel indisponível")
             return
         
-        tunnel_id = available[0]
+        # Encontra o tunnel com maior timestamp
+        latest_tunnel_id = None
+        latest_ts = 0
+        for tid, conns in tunnels.items():
+            if conns.get("tibia") is not None and conns.get("otc") is None:
+                if conns.get("timestamp", 0) > latest_ts:
+                    latest_ts = conns["timestamp"]
+                    latest_tunnel_id = tid
+        if not latest_tunnel_id:
+            print("[OT.py] Nenhum túnel disponível para OTC.")
+            await websocket.send("ERROR: Tunnel indisponível")
+            await websocket.close(code=1008, reason="Túnel indisponível")
+            return
+        
         # Envia o tunnel_id para o OTC
-        await websocket.send(f"TUNNEL_ID:{tunnel_id}")
-        print(f"[OT.py] Enviado tunnel_id {tunnel_id} para OTC.")
+        await websocket.send(f"TUNNEL_ID:{latest_tunnel_id}")
+        print(f"[OT.py] Enviado tunnel_id {latest_tunnel_id} para OTC.")
         # Aguarda que o OTC confirme o registro
-        message = await websocket.recv()
+        try:
+            message = await asyncio.wait_for(websocket.recv(), timeout=5)
+        except asyncio.TimeoutError:
+            print(f"[OT.py] Timeout aguardando registro OTC para túnel {latest_tunnel_id}.")
+            await websocket.close(code=1000, reason="Timeout OTC")
+            return
         if message != "REGISTER_OTC":
             print(f"[OT.py] Registro OTC inválido: {message}")
             await websocket.close(code=1008, reason="Registro OTC inválido")
             return
-        tunnels[tunnel_id]["otc"] = websocket
+        tunnels[latest_tunnel_id]["otc"] = websocket
+        tunnel_id = latest_tunnel_id
         print(f"[OT.py] OTC registrado (Túnel: {tunnel_id}).")
     else:
-        # Se tunnel_id foi fornecido, espera o registro da conexão
+        # Se tunnel_id foi fornecido, trata o registro
         print(f"[OT.py] Túnel {tunnel_id} conectado.")
-        message = await websocket.recv()
+        try:
+            message = await asyncio.wait_for(websocket.recv(), timeout=5)
+        except asyncio.TimeoutError:
+            print(f"[OT.py] Timeout aguardando registro no túnel {tunnel_id}.")
+            await websocket.close(code=1000, reason="Timeout")
+            return
         if message == "REGISTER_TIBIA":
             if tunnel_id in tunnels:
                 print(f"[OT.py] Erro: Tunnel_id {tunnel_id} já está em uso.")
                 await websocket.close(code=1008, reason="Tunnel_id duplicado")
                 return
-            tunnels[tunnel_id] = {"tibia": websocket, "otc": None}
+            # Registra a conexão do Tibia e guarda o timestamp atual
+            tunnels[tunnel_id] = {"tibia": websocket, "otc": None, "timestamp": time.time()}
             print(f"[OT.py] Tibia registrado (Túnel: {tunnel_id}).")
-            
-            # Aguarda até 60 segundos pelo registro do OTC
-            timeout = 60
-            while tunnels[tunnel_id]["otc"] is None and timeout > 0:
-                await asyncio.sleep(1)
-                timeout -= 1
-            if tunnels[tunnel_id]["otc"] is None:
-                print(f"[OT.py] Timeout aguardando OTC no túnel {tunnel_id}. Encerrando conexão Tibia.")
-                await websocket.close(code=1000, reason="Timeout aguardando OTC")
-                return
         elif message == "REGISTER_OTC":
             if tunnel_id not in tunnels or tunnels[tunnel_id]["tibia"] is None:
                 print(f"[OT.py] Erro: Tibia não registrado para {tunnel_id}.")
