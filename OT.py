@@ -1,4 +1,3 @@
-# OT.py
 import asyncio
 import websockets
 import os
@@ -66,11 +65,22 @@ class TunnelManager:
                 del self.otcs[tunnel_id]
             print(f"[OT.py] Túnel {tunnel_id} encerrado.")
 
+async def process_request(path, request_headers):
+    # Verifica se a requisição é de upgrade para WebSocket.
+    # Se não for (por exemplo, uma requisição HEAD para health check), retorna uma resposta HTTP simples.
+    if request_headers.get("Upgrade", "").lower() != "websocket":
+        return 200, [("Content-Type", "text/plain")], b"OK\n"
+    return None
+
 async def main():
     tunnel_manager = TunnelManager()
     PORT = int(os.getenv("PORT", 10000))
-    async with websockets.serve(tunnel_manager.handle_tunnel, "0.0.0.0", PORT):
+    async with websockets.serve(
+        tunnel_manager.handle_tunnel, "0.0.0.0", PORT,
+        process_request=process_request
+    ):
         print(f"[OT.py] Servidor WebSocket rodando em 0.0.0.0:{PORT}")
-        await asyncio.Future()
+        await asyncio.Future()  # Mantém o servidor em execução
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
