@@ -43,7 +43,7 @@ async def handle_tunnel(websocket, path):
         print(f"[OT.py] Erro no túnel {tunnel_id}: {e}")
 
 async def main():
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", 8765))
     async with websockets.serve(
         handle_tunnel,
         "0.0.0.0",
