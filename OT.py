@@ -12,7 +12,7 @@ class TunnelManager:
     async def handle_tunnel(self, websocket, path):
         try:
             # Extrai tunnel_id da query string
-            query = parse_qs(path.split('?')[-1] if '?' in path else {}
+            query = parse_qs(path.split('?')[-1] if '?' in path else '')
             tunnel_id = query.get('tunnel_id', [None])[0]
             
             if not tunnel_id:
