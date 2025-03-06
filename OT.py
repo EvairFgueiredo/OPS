@@ -1,6 +1,7 @@
 # OT.py
 import asyncio
 import websockets
+import os
 
 class TunnelManager:
     def __init__(self):
@@ -44,8 +45,9 @@ class TunnelManager:
 
 async def main():
     tunnel_manager = TunnelManager()
-    async with websockets.serve(tunnel_manager.handle_tunnel, "0.0.0.0", 10000):
-        print("[OT.py] Servidor WebSocket rodando em 0.0.0.0:10000")
+    PORT = int(os.getenv("PORT", 10000))  # Usa a porta do Render ou 10000
+    async with websockets.serve(tunnel_manager.handle_tunnel, "0.0.0.0", PORT):
+        print(f"[OT.py] Servidor WebSocket rodando em 0.0.0.0:{PORT}")
         await asyncio.Future()
 
 asyncio.run(main())
