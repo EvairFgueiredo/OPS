@@ -1,8 +1,9 @@
+# OT.py
 import asyncio
 import os
 import websockets
 from urllib.parse import parse_qs
-import time  # Adicionado
+import time
 
 tunnels = {}
 
@@ -14,30 +15,30 @@ async def process_request(path, request_headers):
 async def handle_tunnel(websocket, path):
     query = parse_qs(path.split('?')[-1] if '?' in path else '')
     tunnel_id = query.get('tunnel_id', [None])[0]
-    
+    port_type = query.get('port', ['login'])[0]  # 'login' ou 'game'
+
     if not tunnel_id:
-        print("[OT.py] Conexão OTC sem tunnel_id. Aguardando REQUEST_TUNNEL.")
+        print(f"[OT.py] Conexão OTC sem tunnel_id (Porta: {port_type}). Aguardando REQUEST_TUNNEL.")
         message = await websocket.recv()
         if message != "REQUEST_TUNNEL":
             print(f"[OT.py] Mensagem inválida: {message}")
             await websocket.close(code=1008, reason="Registro inválido")
             return
         
-        # Seleciona o túnel mais recente
         available = [
             (tid, conns["created_at"])
             for tid, conns in tunnels.items()
-            if conns.get("tibia") and not conns.get("otc")
+            if conns.get("tibia_port_type") == port_type and not conns.get("otc")
         ]
         if not available:
-            print("[OT.py] Nenhum túnel disponível.")
+            print(f"[OT.py] Nenhum túnel {port_type} disponível.")
             await websocket.close(code=1008, reason="Túnel indisponível")
             return
         
-        available.sort(key=lambda x: -x[1])  # Ordena do mais recente
+        available.sort(key=lambda x: -x[1])
         tunnel_id = available[0][0]
         await websocket.send(f"TUNNEL_ID:{tunnel_id}")
-        print(f"[OT.py] Enviado tunnel_id {tunnel_id} para OTC.")
+        print(f"[OT.py] Enviado tunnel_id {tunnel_id} para OTC (Porta: {port_type}).")
         
         message = await websocket.recv()
         if message != "REGISTER_OTC":
@@ -45,22 +46,23 @@ async def handle_tunnel(websocket, path):
             await websocket.close(code=1008, reason="Registro OTC inválido")
             return
         tunnels[tunnel_id]["otc"] = websocket
-        print(f"[OT.py] OTC registrado (Túnel: {tunnel_id}).")
+        print(f"[OT.py] OTC registrado (Túnel: {tunnel_id}, Porta: {port_type}).")
     else:
-        print(f"[OT.py] Túnel {tunnel_id} conectado.")
+        print(f"[OT.py] Túnel {tunnel_id} conectado (Porta: {port_type}).")
         message = await websocket.recv()
-        if message == "REGISTER_TIBIA":
+        if message.startswith("REGISTER_TIBIA:"):
+            _, tibia_port_type = message.split(":")
             if tunnel_id in tunnels:
                 print(f"[OT.py] Erro: Tunnel_id {tunnel_id} já está em uso.")
                 await websocket.close(code=1008, reason="Tunnel_id duplicado")
                 return
-            # Adiciona timestamp ao criar o túnel
             tunnels[tunnel_id] = {
                 "tibia": websocket,
                 "otc": None,
-                "created_at": time.time()  # Novo campo
+                "tibia_port_type": tibia_port_type,
+                "created_at": time.time()
             }
-            print(f"[OT.py] Tibia registrado (Túnel: {tunnel_id}).")
+            print(f"[OT.py] Tibia registrado (Túnel: {tunnel_id}, Porta: {tibia_port_type}).")
             
             timeout = 60
             while tunnels[tunnel_id]["otc"] is None and timeout > 0:
@@ -70,13 +72,6 @@ async def handle_tunnel(websocket, path):
                 print(f"[OT.py] Timeout aguardando OTC no túnel {tunnel_id}.")
                 await websocket.close(code=1000, reason="Timeout aguardando OTC")
                 return
-        elif message == "REGISTER_OTC":
-            if tunnel_id not in tunnels or tunnels[tunnel_id]["tibia"] is None:
-                print(f"[OT.py] Erro: Tibia não registrado para {tunnel_id}.")
-                await websocket.close(code=1008, reason="Tibia ausente")
-                return
-            tunnels[tunnel_id]["otc"] = websocket
-            print(f"[OT.py] OTC registrado (Túnel: {tunnel_id}).")
         else:
             print(f"[OT.py] Mensagem inválida: {message}")
             await websocket.close(code=1008, reason="Registro inválido")
@@ -105,14 +100,13 @@ async def handle_tunnel(websocket, path):
         del tunnels[tunnel_id]
         print(f"[OT.py] Túnel {tunnel_id} removido.")
 
-# Função para limpar túneis antigos
 async def cleanup_old_tunnels():
     while True:
-        await asyncio.sleep(10)  # Verifica a cada 10 segundos
+        await asyncio.sleep(10)
         now = time.time()
         to_delete = []
         for tid, conns in tunnels.items():
-            if conns["otc"] is None and (now - conns["created_at"]) > 30:  # 30 segundos de timeout
+            if conns["otc"] is None and (now - conns["created_at"]) > 30:
                 to_delete.append(tid)
         for tid in to_delete:
             if tunnels[tid]["tibia"]:
@@ -129,7 +123,7 @@ async def main():
         process_request=process_request
     ):
         print(f"[OT.py] Servidor WebSocket rodando em 0.0.0.0:{port}")
-        asyncio.create_task(cleanup_old_tunnels())  # Inicia a limpeza
+        asyncio.create_task(cleanup_old_tunnels())
         await asyncio.Future()
 
 if __name__ == "__main__":
