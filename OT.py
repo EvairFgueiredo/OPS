@@ -115,7 +115,7 @@ async def cleanup_old_tunnels():
             print(f"[OT.py] Túnel {tid} removido por timeout.")
 
 async def main():
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", 8443))
     async with websockets.serve(
         handle_tunnel, 
         "0.0.0.0", 
