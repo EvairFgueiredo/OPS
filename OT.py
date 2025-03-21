@@ -89,7 +89,7 @@ async def cleanup_old_tunnels():
         now = time.time()
         to_delete = []
         for tid, conns in tunnels.items():
-            if (conns["otc"] is None or conns["tibia"] is None) and (now - conns["created_at"]) > 10:
+            if (conns["otc"] is None or conns["tibia"] is None) and (now - conns["created_at"]) > 120:
                 to_delete.append(tid)
         for tid in to_delete:
             if tunnels[tid]["tibia"]:
