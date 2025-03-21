@@ -60,8 +60,7 @@ async def handle_tunnel(websocket, path):
                 timeout -= 1
             
             if tunnels[tunnel_id]["otc"] is None:
-                # Adiciona um delay antes de fechar a conexão para dar tempo ao OTC
-                await asyncio.sleep(2)
+                await asyncio.sleep(2)  # Delay para dar tempo ao OTC
                 await websocket.close(code=1000, reason="Timeout aguardando OTC")
                 return
 
@@ -90,7 +89,7 @@ async def cleanup_old_tunnels():
         await asyncio.sleep(10)
         now = time.time()
         to_delete = []
-        # Aumenta o tempo para 30 segundos para evitar cleanup prematuro
+        # Usa 30 segundos para evitar cleanup prematuro
         for tid, conns in tunnels.items():
             if (conns["otc"] is None or conns["tibia"] is None) and (now - conns["created_at"]) > 30:
                 to_delete.append(tid)
