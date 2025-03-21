@@ -102,7 +102,7 @@ async def handle_tunnel(websocket, path):
 
 async def cleanup_old_tunnels():
     while True:
-        await asyncio.sleep(10)
+        await asyncio.sleep(3)
         now = time.time()
         to_delete = []
         for tid, conns in tunnels.items():
