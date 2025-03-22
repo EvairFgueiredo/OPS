@@ -17,6 +17,7 @@ async def handle_tunnel(websocket, path):
     port_type = query.get('port', ['login'])[0]
 
     if not tunnel_id:
+        # OTC conecta sem tunnel_id, deve pedir um túnel disponível
         message = await websocket.recv()
         if message != "REQUEST_TUNNEL":
             await websocket.close(code=1008, reason="Registro inválido")
@@ -32,6 +33,7 @@ async def handle_tunnel(websocket, path):
             await websocket.close(code=1008, reason="Túnel indisponível")
             return
         
+        # Seleciona o túnel mais recente
         tunnel_id = max(available, key=lambda x: x[1])[0]
         await websocket.send(f"TUNNEL_ID:{tunnel_id}")
         
@@ -44,9 +46,10 @@ async def handle_tunnel(websocket, path):
         print(f"[OT.py] OTC registrado (Túnel: {tunnel_id}, Porta: {port_type}).")
 
     else:
+        # Tibia conecta
         message = await websocket.recv()
         if message.startswith("REGISTER_TIBIA:"):
-            _, tibia_port_type = message.split(":", 1)
+            _, tibia_port_type = message.split(":")
             tunnels[tunnel_id] = {
                 "tibia": websocket,
                 "otc": None,
@@ -60,10 +63,10 @@ async def handle_tunnel(websocket, path):
                 timeout -= 1
             
             if tunnels[tunnel_id]["otc"] is None:
-                await asyncio.sleep(2)  # Delay para dar tempo ao OTC
                 await websocket.close(code=1000, reason="Timeout aguardando OTC")
                 return
 
+    # Se ambos os lados estiverem conectados, inicia o encaminhamento
     if tunnels[tunnel_id].get("tibia") and tunnels[tunnel_id].get("otc"):
         tibia_ws = tunnels[tunnel_id]["tibia"]
         otc_ws = tunnels[tunnel_id]["otc"]
@@ -74,7 +77,7 @@ async def handle_tunnel(websocket, path):
                     await target.send(data)
                     print(f"[OT.py] {direction}: {len(data)} bytes")
             except Exception as e:
-                print(f"[OT.py] Erro em {direction}: {str(e)}")
+                print(f"[OT.py] Erro em {direction}: {e}")
 
         await asyncio.gather(
             forward(tibia_ws, otc_ws, "Tibia → OTC"),
@@ -89,14 +92,14 @@ async def cleanup_old_tunnels():
         await asyncio.sleep(10)
         now = time.time()
         to_delete = []
-        # Usa 30 segundos para evitar cleanup prematuro
         for tid, conns in tunnels.items():
-            if (conns["otc"] is None or conns["tibia"] is None) and (now - conns["created_at"]) > 30:
+            if (conns["otc"] is None or conns["tibia"] is None) and (now - conns["created_at"]) > 60:
                 to_delete.append(tid)
         for tid in to_delete:
             if tunnels[tid]["tibia"]:
                 await tunnels[tid]["tibia"].close()
             del tunnels[tid]
+            print(f"[OT.py] Túnel {tid} removido por timeout.")
 
 async def main():
     port = int(os.environ.get("PORT", 8443))
